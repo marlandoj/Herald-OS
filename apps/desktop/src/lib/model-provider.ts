@@ -51,8 +51,8 @@ export type EndpointKeys = Record<string, string>
 /** Providers that run on this computer: Settings > Software installs them and picks their model. */
 const LOCAL = new Set(['lmstudio'])
 
-/** Every provider Hermes knows: the current one first, then those ready to use, then the rest, each in Hermes's own order. */
-export function providerChoices(options: ModelOptionsResult | null | undefined, signIns: readonly SignInProvider[], keys: KeyCatalog, endpoints: EndpointKeys = {}): ProviderChoice[] {
+/** Every provider, current first. A null catalog is unread; an empty catalog is known absence. */
+export function providerChoices(options: ModelOptionsResult | null | undefined, signIns: readonly SignInProvider[], keys: KeyCatalog | null, endpoints: EndpointKeys = {}): ProviderChoice[] {
   const bySlug = new Map(signIns.map(provider => [provider.id, provider]))
   const rank = (choice: ProviderChoice) => (choice.current ? 0 : choice.ready ? 1 : 2)
 
@@ -65,14 +65,15 @@ export function providerChoices(options: ModelOptionsResult | null | undefined, 
   )
 }
 
-function choiceFor(row: ModelOptionProvider, signIn: SignInProvider | undefined, keys: KeyCatalog, endpoints: EndpointKeys): ProviderChoice {
+function choiceFor(row: ModelOptionProvider, signIn: SignInProvider | undefined, keys: KeyCatalog | null, endpoints: EndpointKeys): ProviderChoice {
+  const catalog = keys ?? {}
   const endpointKey = row.is_user_defined ? (endpoints[endpointId(row.slug)] ?? null) : null
   // `model.options` names the key only for providers in Hermes's registry, which OpenRouter is not.
-  const keyEnv = endpointKey || row.key_env || (Object.entries(keys).find(([, entry]) => entry.provider === row.slug && entry.is_password)?.[0] ?? null)
+  const keyEnv = endpointKey || row.key_env || (Object.entries(catalog).find(([, entry]) => entry.provider === row.slug && entry.is_password)?.[0] ?? null)
   const setup = setupFor(row, signIn, keyEnv)
   // Hermes lists a custom endpoint whether or not the key it names is saved; the key catalog, once
   // read, lists every variable in Hermes's .env.
-  const keyUnsaved = endpointKey !== null && Object.keys(keys).length > 0 && !keys[endpointKey]?.is_set
+  const keyUnsaved = endpointKey !== null && keys !== null && !catalog[endpointKey]?.is_set
 
   return {
     slug: row.slug,
@@ -82,7 +83,7 @@ function choiceFor(row: ModelOptionProvider, signIn: SignInProvider | undefined,
     ready: row.authenticated !== false && !(signIn?.flow === 'device_code' && !signIn.loggedIn) && !keyUnsaved,
     setup,
     keyEnv: setup === 'key' ? keyEnv : null,
-    helpUrl: setup === 'key' ? (keyEnv ? (keys[keyEnv]?.url ?? null) : null) : (signIn?.docsUrl ?? null),
+    helpUrl: setup === 'key' ? (keyEnv ? (catalog[keyEnv]?.url ?? null) : null) : (signIn?.docsUrl ?? null),
     command: setup === 'terminal' ? (signIn?.cliCommand ?? 'hermes model') : null,
     models: (row.models ?? []).filter(Boolean)
   }
@@ -105,52 +106,9 @@ function setupFor(row: ModelOptionProvider, signIn: SignInProvider | undefined, 
   return row.is_user_defined ? 'endpoint' : 'terminal'
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
-
 /** An endpoint's id as Hermes matches it: `custom:Lab GPU` and `lab-gpu` are the same endpoint. */
 const endpointId = (value: string) => value.trim().toLowerCase().replace(/ /g, '-').replace(/^custom:/, '')
-
-/** A `custom_providers` name up to the separator Hermes puts before a model ("Lab GPU — llama3"). */
-const namePrefix = (name: string) => ['—', ' - '].map(separator => name.split(separator)).find(parts => parts.length > 1)?.[0].trim() ?? name
-
-/** The variable a config entry keeps its key in, read as Hermes reads it; never the key itself. */
-function keyVariable(entry: Record<string, unknown>): string | null {
-  const named = [entry.key_env, entry.api_key_env].find((value): value is string => typeof value === 'string' && value.trim() !== '')
-  const reference = typeof entry.api_key === 'string' ? /^\$\{(\w+)\}$/.exec(entry.api_key.trim())?.[1] : undefined
-
-  return named?.trim() ?? reference ?? null
-}
-
-/**
- * The variables the custom endpoints in Hermes's raw config (`GET /api/config?include_defaults=false`)
- * keep their API keys in: `key_env`, else `api_key_env`, else an `api_key` of just `${VAR}`. A key
- * written into config.yaml itself is never kept.
- */
-export function endpointKeys(config: { providers?: unknown; custom_providers?: unknown } | null | undefined): EndpointKeys {
-  const found: EndpointKeys = {}
-  const add = (id: string, entry: unknown) => {
-    const variable = isRecord(entry) ? keyVariable(entry) : null
-
-    if (id && variable && !(id in found)) {
-      found[id] = variable
-    }
-  }
-  const providers = config?.providers
-  const legacy = config?.custom_providers
-
-  // Hermes finds an endpoint under `providers:` before the older list.
-  for (const [id, entry] of Object.entries(isRecord(providers) ? providers : {})) {
-    add(endpointId(id), entry)
-  }
-
-  for (const entry of Array.isArray(legacy) ? legacy : []) {
-    if (isRecord(entry)) {
-      add(endpointId(String(entry.provider_key || namePrefix(String(entry.name ?? '')))), entry)
-    }
-  }
-
-  return found
-}
+export { endpointKeys } from '../../shared/provider-metadata.ts'
 
 /** A bare `/model`'s answer from `model.options` for the session: its model, and its provider by name. */
 export function currentModelText(options: ModelOptionsResult | null | undefined): string | null {

@@ -13,8 +13,14 @@ import { $focusedWindowId, $windows, focusWindow } from './windows.ts'
 let lastEditable: HTMLElement | null = null
 let bound = false
 
+/** Passwords are never ordinary edit targets, even when a caller omitted the opt-out marker. */
+function isEditExcluded(element: Element | null): boolean {
+  return Boolean(element?.closest('[data-edit-ignore]')) ||
+    (element instanceof HTMLInputElement && element.type === 'password')
+}
+
 export function isEditable(element: Element | null): element is HTMLElement {
-  if (!element || !(element instanceof HTMLElement)) {
+  if (!element || !(element instanceof HTMLElement) || isEditExcluded(element)) {
     return false
   }
 
@@ -27,7 +33,7 @@ export function isEditable(element: Element | null): element is HTMLElement {
   }
 
   if (element instanceof HTMLInputElement) {
-    return !element.disabled && !element.readOnly && /^(text|search|url|email|password|tel|number|)$/.test(element.type)
+    return !element.disabled && !element.readOnly && /^(text|search|url|email|tel|number|)$/.test(element.type)
   }
 
   return false
@@ -35,8 +41,17 @@ export function isEditable(element: Element | null): element is HTMLElement {
 
 /** Remember the focused field now (a conversation is starting and may move focus to the orb/mic). */
 export function rememberFocusedEditable(): void {
-  if (isEditable(document.activeElement)) {
-    lastEditable = document.activeElement
+  rememberEditable(document.activeElement)
+}
+
+function rememberEditable(element: Element | null): void {
+  // An ordinary ignored picker must not replace its destination; a password clears it outright.
+  if ((element instanceof HTMLInputElement && element.type === 'password') || (lastEditable && (!lastEditable.isConnected || !isEditable(lastEditable)))) {
+    lastEditable = null
+  }
+
+  if (isEditable(element)) {
+    lastEditable = element
   }
 }
 
@@ -47,14 +62,9 @@ export function bindEditTarget(): () => void {
 
   bound = true
   // Pickers that type into the field the person was in (the emoji picker) opt out with data-edit-ignore.
-  const remember = (element: Element | null) => {
-    if (isEditable(element) && !element.closest('[data-edit-ignore]')) {
-      lastEditable = element
-    }
-  }
-  const onFocus = (event: FocusEvent) => remember(event.target as Element)
+  const onFocus = (event: FocusEvent) => rememberEditable(event.target as Element)
   // A press on a field also counts: focus events do not fire while the window is in the background.
-  const onPointer = (event: PointerEvent) => remember((event.target as Element | null)?.closest?.('textarea, input, [contenteditable="true"]') ?? null)
+  const onPointer = (event: PointerEvent) => rememberEditable((event.target as Element | null)?.closest?.('textarea, input, [contenteditable="true"]') ?? null)
   document.addEventListener('focusin', onFocus, true)
   document.addEventListener('pointerdown', onPointer, true)
 
@@ -72,6 +82,12 @@ function windowIdOf(element: HTMLElement): string | null {
 
 /** Describe the target for captions: "the terminal", "the Hermes composer", "the web page". */
 export function describeTarget(): string {
+  if (isEditExcluded(document.activeElement)) {
+    currentEditable()
+
+    return 'nothing'
+  }
+
   const web = frontWebView()
 
   if (web) {
@@ -108,7 +124,16 @@ function frontWebView(): string | null {
 function currentEditable(): HTMLElement | null {
   const active = document.activeElement
 
-  if (isEditable(active) && !active.closest('[data-edit-ignore]')) {
+  // Recheck connected caches: their type, marker, ancestry or writable state may have changed.
+  if (isEditExcluded(active) || (lastEditable && (!lastEditable.isConnected || !isEditable(lastEditable)))) {
+    lastEditable = null
+  }
+
+  if (isEditExcluded(active)) {
+    return null
+  }
+
+  if (isEditable(active)) {
     return active
   }
 
@@ -144,6 +169,17 @@ export class NoEditTargetError extends Error {
  * web page); clipboard actions also work on a plain selection.
  */
 export async function performEdit(action: EditAction, options: { needsField?: boolean } = {}): Promise<{ target: string }> {
+  // Optional clipboard/selection edits otherwise fall through to Chromium's active password field.
+  if (isEditExcluded(document.activeElement)) {
+    lastEditable = null
+
+    if (options.needsField) {
+      throw new NoEditTargetError()
+    }
+
+    return { target: 'nothing' }
+  }
+
   const web = frontWebView()
 
   if (web) {
@@ -166,6 +202,17 @@ export async function performEdit(action: EditAction, options: { needsField?: bo
     }
 
     element.focus({ preventScroll: true })
+  }
+
+  // Focus handlers can change protection synchronously; never dispatch after that transition.
+  if (isEditExcluded(document.activeElement) || (element && !isEditable(element))) {
+    lastEditable = null
+
+    if (options.needsField) {
+      throw new NoEditTargetError()
+    }
+
+    return { target: 'nothing' }
   }
 
   const target = describeTarget()

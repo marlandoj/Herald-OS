@@ -6,7 +6,8 @@ import { VOICE_DEFAULTS } from '../../shared/voice-prefs.ts'
 // offers to open the pane where the switch is when the reason is the permission.
 
 const edges = vi.hoisted(() => {
-  Object.assign(globalThis, { window: { innerWidth: 1440, innerHeight: 900, heraldOS: {} }, document: { activeElement: null } })
+  // No focused field in this fixture, but the real privacy guard needs the DOM constructor.
+  Object.assign(globalThis, { HTMLInputElement: class {}, window: { innerWidth: 1440, innerHeight: 900, heraldOS: {} }, document: { activeElement: null } })
 
   return {
     notified: [] as Array<{ title: string; body?: string; actions?: unknown }>,

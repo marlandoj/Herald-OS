@@ -1,6 +1,6 @@
 import type { ModelOptionsResult } from '@herald-os/client'
 import { atom } from 'nanostores'
-import { type EndpointKeys, endpointKeys, type KeyCatalog, pickModel, type ProviderChoice, providerChoices } from '../lib/model-provider.ts'
+import { type EndpointKeys, type KeyCatalog, pickModel, type ProviderChoice, providerChoices } from '../lib/model-provider.ts'
 import { rest } from '../lib/rest.ts'
 import { $activeChat } from './chat.ts'
 import { gatewayRequest } from './gateway.ts'
@@ -62,22 +62,21 @@ export async function loadModelOptions(): Promise<ModelOptionsResult> {
 
 /**
  * Hermes's key catalog: which variable each provider's API key goes in, where to get one, and
- * whether one is saved. Empty when the runtime has none. The route also previews the saved keys;
- * those are dropped here.
+ * whether one is saved. Only main-owned metadata crosses IPC; a discovery failure stays an error.
  */
 export function loadKeyCatalog(): Promise<KeyCatalog> {
-  return rest
-    .get<KeyCatalog | null>('/api/env')
-    .then(keys => Object.fromEntries(Object.entries(keys ?? {}).map(([name, { provider, is_password, is_set, url }]) => [name, { provider, is_password, is_set, url }])))
-    .catch(() => ({}))
+  return window.heraldOS.credentials.providerCatalog().then(result => {
+    if (!result.ok) throw new Error('Could not read provider key metadata.')
+    return result.data
+  }, () => { throw new Error('Could not read provider key metadata.') })
 }
 
 /** The variable each custom endpoint's API key goes in, as its entry in config.yaml names it. */
 export function loadEndpointKeys(): Promise<EndpointKeys> {
-  return rest
-    .get<Parameters<typeof endpointKeys>[0]>('/api/config', { include_defaults: false })
-    .then(endpointKeys)
-    .catch(() => ({}))
+  return window.heraldOS.credentials.providerEndpoints().then(result => {
+    if (!result.ok) throw new Error('Could not read provider endpoint metadata.')
+    return result.data
+  }, () => { throw new Error('Could not read provider endpoint metadata.') })
 }
 
 /** The providers as Settings lists them, read now. */
@@ -152,7 +151,13 @@ export async function saveProviderKey(choice: ProviderChoice, key: string): Prom
     throw new Error(`Paste the ${choice.name} API key first.`)
   }
 
-  await rest.put('/api/env', { key: choice.keyEnv, value })
+  let saved = false
+  try {
+    saved = (await window.heraldOS.credentials.saveProvider(choice.keyEnv, value)).ok
+  } catch {
+    // IPC/storage errors are not safe display text.
+  }
+  if (!saved) throw new Error('Could not save the API key.')
   // The runtime reads keys from its own environment as well as from the file.
   await gatewayRequest('reload.env', {}).catch(() => undefined)
 
