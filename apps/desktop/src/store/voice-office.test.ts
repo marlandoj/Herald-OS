@@ -16,7 +16,8 @@ const edges = vi.hoisted(() => {
     notifications: { native: async () => undefined }
   }
 
-  Object.assign(globalThis, { window: { innerWidth: 1440, innerHeight: 900, heraldOS }, document: { activeElement: null } })
+  // Keep the real edit-target privacy guard; this fixture has no focused field.
+  Object.assign(globalThis, { HTMLInputElement: class {}, window: { innerWidth: 1440, innerHeight: 900, heraldOS }, document: { activeElement: null } })
 
   return {
     heraldOS,

@@ -1,8 +1,14 @@
+import { shell } from 'electron'
 import vm from 'node:vm'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CALENDAR_JXA, DarwinPlatform, parseDf, parsePmset, parsePs, parseVmStat, parseWifiDevice, parseWifiSummary } from './darwin.ts'
 
 const commands = vi.hoisted(() => ({ outputs: new Map<string, string>(), calls: [] as string[] }))
+
+// Keep the real platform/parsers; replace only Electron's native shell boundary.
+vi.mock('electron', () => ({
+  shell: { openPath: vi.fn().mockResolvedValue(''), showItemInFolder: vi.fn() }
+}))
 
 vi.mock('./exec.ts', () => ({
   MISSING_BINARY: 127,
@@ -67,6 +73,31 @@ describe('darwin parsers', () => {
     const rows = parsePs('  512     1 sam   12.5  0.3   204800 /Applications/Visual Studio Code.app/Contents/MacOS/Electron\n')
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ pid: 512, ppid: 1, user: 'sam', cpuPercent: 12.5, rssBytes: 204800 * 1024, name: 'Electron' })
+  })
+})
+
+describe('Electron shell delegation', () => {
+  beforeEach(() => {
+    vi.mocked(shell.openPath).mockClear()
+    vi.mocked(shell.showItemInFolder).mockClear()
+  })
+
+  it('launches the requested app when Electron returns an empty error string', async () => {
+    vi.mocked(shell.openPath).mockResolvedValueOnce('')
+    await expect(new DarwinPlatform().launchApp('/Applications/Example.app')).resolves.toBeUndefined()
+    expect(shell.openPath).toHaveBeenCalledExactlyOnceWith('/Applications/Example.app')
+  })
+
+  it('reports the error string returned by Electron instead of claiming success', async () => {
+    vi.mocked(shell.openPath).mockResolvedValueOnce('Permission denied')
+    await expect(new DarwinPlatform().launchApp('/Applications/Example.app')).rejects.toThrow('Permission denied')
+    expect(shell.openPath).toHaveBeenCalledExactlyOnceWith('/Applications/Example.app')
+  })
+
+  it('reveals the exact requested path through Electron', async () => {
+    await expect(new DarwinPlatform().revealPath('/synthetic/with space.txt')).resolves.toBeUndefined()
+    expect(shell.showItemInFolder).toHaveBeenCalledExactlyOnceWith('/synthetic/with space.txt')
+    expect(shell.openPath).not.toHaveBeenCalled()
   })
 })
 

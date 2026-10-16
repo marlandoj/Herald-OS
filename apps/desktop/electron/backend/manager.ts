@@ -8,6 +8,9 @@ import { osEnv } from '../env.ts'
 import { log } from '../log.ts'
 import { hermesHome, heraldOsDataDir } from '../paths.ts'
 import { ensureBridgePlugin } from './bridge-plugin.ts'
+import { secureActiveCredentialFile } from './credential-permissions.ts'
+import { rendererConfig, rendererConfigPatch } from './renderer-config.ts'
+import { rendererApiPath } from './renderer-path.ts'
 import { type AttachTarget, attachTarget, foreignGateway } from './coexist.ts'
 import { backendReadsLocalFiles } from './local-files.ts'
 import { waitForStatus } from './probe.ts'
@@ -96,6 +99,8 @@ export type BackendListener = (state: BackendState) => void
 export class BackendManager {
   private state: BackendState = { phase: 'idle', attempt: 0, logTail: [] }
   private child: ChildProcess | null = null
+  /** Exact home passed to our serve child; never inferred from an attachment. */
+  private ownedCredentialHome: string | null = null
   private token = ''
   /** Control socket the bridge plugin's `os_ui` tool dials, and the token it must present. */
   private control: { socketPath: string; token: string } | null = null
@@ -117,6 +122,33 @@ export class BackendManager {
   /** Process id of the running `hermes serve`, if any. */
   childPid(): number | null {
     return this.child?.pid ?? null
+  }
+
+  /** Bind pre/post guards to one local child, home and API generation. */
+  prepareCredentialWrite(): () => void {
+    const child = this.child
+    const home = this.ownedCredentialHome
+    const generation = this.startGeneration
+    const baseUrl = this.state.baseUrl
+    const token = this.token
+    let directory: { dev: number; ino: number } | undefined
+    const protect = () => {
+      if (!child?.pid || child.exitCode !== null || child.killed || !home ||
+        this.child !== child || this.ownedCredentialHome !== home || this.startGeneration !== generation ||
+        this.state.phase !== 'ready' || !['env', 'managed', 'path'].includes(this.state.runtime?.kind ?? '') ||
+        this.state.baseUrl !== baseUrl || !baseUrl || this.token !== token ||
+        !path.isAbsolute(home) || hermesHome() !== home) {
+        throw new Error('Credential storage unavailable')
+      }
+      const current = fs.lstatSync(home)
+      if (directory && (current.dev !== directory.dev || current.ino !== directory.ino)) {
+        throw new Error('Credential storage unavailable')
+      }
+      secureActiveCredentialFile()
+      directory ??= current
+    }
+    protect()
+    return protect
   }
 
   onState(listener: BackendListener): () => void {
@@ -165,6 +197,33 @@ export class BackendManager {
     return `ws://127.0.0.1:${port}${paths[kind]}?token=${encodeURIComponent(this.token)}`
   }
 
+  /** Narrow env/config restriction, not global renderer credential confinement. */
+  async restForRenderer<T>(request: RestRequest): Promise<T> {
+    const target = request?.path
+    const pathname = rendererApiPath(target)
+    if (!pathname || /^\/api\/env(?:\/|$)/i.test(pathname)) {
+      throw new Error('REST request not allowed')
+    }
+    if (/^\/api\/config(?:\/|$)/i.test(pathname)) {
+      if (target !== '/api/config' || !['GET', 'PUT'].includes(request.method) ||
+        Object.entries(request.query ?? {}).some(([key, value]) => key !== 'include_defaults' || typeof value !== 'boolean') ||
+        (request.method === 'PUT' && !rendererConfigPatch(request.body))) {
+        throw new Error('REST request not allowed')
+      }
+      try {
+        const result = await this.rest<unknown>(request)
+        if (request.method === 'PUT') return { ok: true } as T
+        // Public config API: include_defaults=false uses read_raw_config(), without
+        // environment expansion. Never infer free-form provenance from the defaulted GET.
+        const saved = await this.rest<unknown>({ method: 'GET', path: '/api/config', query: { include_defaults: false } })
+        return rendererConfig(result, saved) as T
+      } catch {
+        throw new Error('Configuration operation failed')
+      }
+    }
+    return this.rest<T>(request)
+  }
+
   async rest<T>(request: RestRequest): Promise<T> {
     const { baseUrl } = this.state
 
@@ -194,6 +253,14 @@ export class BackendManager {
       signal: AbortSignal.timeout(60_000)
     })
 
+    // Credential errors may include submitted values. Do not even parse their bodies.
+    if (!response.ok && request.path === '/api/env') {
+      throw new Error('Credential operation failed')
+    }
+    if (!response.ok && request.path === '/api/config') {
+      throw new Error('Configuration operation failed')
+    }
+
     const text = await response.text()
 
     if (!response.ok) {
@@ -208,6 +275,7 @@ export class BackendManager {
   private async launch(attempt: number): Promise<void> {
     const generation = ++this.startGeneration
     this.clearWaitTimer()
+    this.ownedCredentialHome = null
     this.update({ phase: attempt === 0 ? 'resolving' : 'restarting', attempt, error: undefined, install: undefined, localFiles: undefined })
 
     let attach: AttachTarget | null
@@ -294,6 +362,7 @@ export class BackendManager {
 
   /** Use a backend that is already running (HERALD_OS_BACKEND_URL) instead of starting a second one. */
   private async attach(target: AttachTarget, attempt: number, generation: number): Promise<void> {
+    this.ownedCredentialHome = null
     this.token = target.token
     this.update({ runtime: { kind: 'attached', label: `the Hermes backend at ${target.baseUrl}`, command: [] }, phase: 'starting' })
 
@@ -384,6 +453,7 @@ export class BackendManager {
       detached: false
     })
     this.child = child
+    this.ownedCredentialHome = env.HERMES_HOME ?? null
 
     return new Promise<number>((resolve, reject) => {
       let settled = false
@@ -439,6 +509,7 @@ export class BackendManager {
 
         if (this.child === child) {
           this.child = null
+          this.ownedCredentialHome = null
         }
 
         settle(() => reject(new Error(`hermes serve exited early (code ${code ?? 'null'}, signal ${signal ?? 'none'})`)))
@@ -487,6 +558,7 @@ export class BackendManager {
   private async killChild(): Promise<void> {
     const child = this.child
     this.child = null
+    this.ownedCredentialHome = null
     // Any in-flight launch belongs to a previous generation now.
     this.startGeneration++
 

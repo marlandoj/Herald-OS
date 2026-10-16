@@ -48,7 +48,10 @@ export function ModelProviderRow() {
   const options = useBackendData(loadModelOptions, [changes], { enabled: online })
   const keys = useBackendData(loadKeyCatalog, [changes])
   const endpoints = useBackendData(loadEndpointKeys, [changes])
-  const choices = useMemo(() => providerChoices(options.data, auth.providers, keys.data ?? {}, endpoints.data ?? {}), [options.data, auth.providers, keys.data, endpoints.data])
+  const metadataReady = keys.data !== null && endpoints.data !== null && !keys.error && !endpoints.error && !keys.loading && !endpoints.loading
+  const providerError = options.error ?? keys.error ?? endpoints.error
+  const providerLoading = options.loading || keys.loading || endpoints.loading || !metadataReady
+  const choices = useMemo(() => providerChoices(metadataReady ? options.data : null, auth.providers, keys.data ?? {}, endpoints.data ?? {}), [metadataReady, options.data, auth.providers, keys.data, endpoints.data])
   const current = choices.find(choice => choice.current) ?? null
   const [setup, setSetup] = useState<ProviderChoice | null>(null)
   const [confirm, setConfirm] = useState<Extract<ModelChange, { ok: false }> | null>(null)
@@ -124,11 +127,11 @@ export function ModelProviderRow() {
   }
 
   const others = auth.providers.filter(provider => provider.loggedIn && provider.id !== current?.slug).map(provider => provider.name)
-  const description = !options.data
+  const description = !options.data || !metadataReady
     ? !online
       ? 'Waiting for Hermes.'
-      : options.error
-        ? `Could not read the providers: ${options.error}`
+      : providerError
+        ? `Could not read the providers: ${providerError}`
         : 'Checking…'
     : !current
       ? 'Hermes has no model provider yet. Choose one to sign in to, or one to give an API key.'
@@ -172,7 +175,7 @@ export function ModelProviderRow() {
         </Pill>
       )}
       {current && <CurrentAction current={current} onSetup={openSetup} />}
-      <ProviderMenu choices={choices} current={current} loading={options.loading} error={options.error} disabled={!online || busy} busy={busy} request={menuRequest} onPick={pick} />
+      <ProviderMenu choices={choices} current={current} loading={providerLoading} error={providerError} disabled={!online || busy} busy={busy} request={menuRequest} onPick={pick} />
       <GlassButton size="sm" variant="ghost" onClick={refresh} aria-label="Refresh providers">
         <IconRefresh />
       </GlassButton>

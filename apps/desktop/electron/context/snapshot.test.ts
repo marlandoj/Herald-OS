@@ -1,6 +1,15 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { RecentFile } from '../../shared/ipc.ts'
 import { appNameFromCommand, mergeRecent, parseGitLog, parseGitStatus } from './snapshot.ts'
+
+// Parser units reach Electron only through the eager platform imports. No shell
+// operation belongs in these tests; fail loudly if that boundary is crossed.
+vi.mock('electron', () => ({
+  shell: {
+    openPath: vi.fn(() => { throw new Error('Unexpected Electron shell.openPath in snapshot parser tests') }),
+    showItemInFolder: vi.fn(() => { throw new Error('Unexpected Electron shell.showItemInFolder in snapshot parser tests') })
+  }
+}))
 
 describe('parseGitStatus', () => {
   it('reads the branch and the changed paths', () => {

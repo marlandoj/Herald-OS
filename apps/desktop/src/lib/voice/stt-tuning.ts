@@ -18,7 +18,7 @@ export const STT_VOCABULARY =
   'Open hello.pdf, open the Downloads folder, type, paste, copy, select all, minimize, maximize, close window.'
 
 export interface LocalSttConfig {
-  stt?: { provider?: string; local?: { model?: string; initial_prompt?: string } }
+  stt?: { provider?: string; local?: { model?: string; initial_prompt?: string; has_initial_prompt?: boolean; model_tuning_eligible?: boolean } }
 }
 
 /**
@@ -35,11 +35,13 @@ export function sttTuningPatch(config: LocalSttConfig): { stt: { local: Record<s
   const local = config.stt?.local ?? {}
   const patch: Record<string, string> = {}
 
-  if (!local.model || local.model === 'base') {
+  // A suppressed configured model is not a missing model. Older/direct configs without
+  // projection metadata keep the original literal/default behavior.
+  if (local.model_tuning_eligible ?? (!local.model || local.model === 'base')) {
     patch.model = RECOMMENDED_LOCAL_MODEL
   }
 
-  if (!local.initial_prompt?.trim()) {
+  if (!local.has_initial_prompt && !local.initial_prompt?.trim()) {
     patch.initial_prompt = STT_VOCABULARY
   }
 

@@ -17,6 +17,7 @@ import { $spaces, spaceLabel } from '../../../store/spaces.ts'
 import { $switches, setSwitch, switchLabel } from '../../../store/switches.ts'
 import { $commentName, loadCommentName, setCommentName } from '../../office/comment-name.ts'
 import { errorText, markSaved, MenuDropdown, SectionTitle, SettingsGroup, SettingsRow, Stepper } from './shared.tsx'
+import { AdvancedSettings } from './AdvancedSettings.tsx'
 
 // Words for "language" in every language Herald has, so whoever is lost in another one can search for it.
 const LANGUAGE_KEYWORDS = 'language locale translation english chinese 语言 中文 简体中文 英文'
@@ -96,6 +97,7 @@ export function GeneralSection() {
       {hostPlatform() === 'linux' && <IdleGroup />}
       <TypingGroup />
       <OfficeGroup />
+      <AdvancedSettings />
 
       <SettingsGroup title={t('settings.general.session')}>
         {hostPlatform() === 'linux' ? (

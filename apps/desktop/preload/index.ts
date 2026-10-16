@@ -84,6 +84,7 @@ import {
   type WriteTextOptions
 } from '../shared/ipc.ts'
 import type { BrandingPatch, BrandingView } from '../shared/branding.ts'
+import type { ProviderEndpointKeys, ProviderKeyCatalog, SecretMetadata, SecretName, SecretResult, SecretSaveMode } from '../shared/credentials.ts'
 import type { ModelId, ModelProgress, ModelStatus } from '../shared/canvas/models.ts'
 import type { OfficeAbilities, OfficeApp } from '../shared/office/files.ts'
 import type { MenuExtensions } from '../shared/menu-extensions.ts'
@@ -117,6 +118,14 @@ const hearActivity = (_event: unknown, events: RoomActivity[]) => {
 
 /** The whole capability surface the renderer gets. Keep it narrow and typed. */
 const api = {
+  credentials: {
+    providerEndpoints: (): Promise<SecretResult<ProviderEndpointKeys>> => ipcRenderer.invoke(IPC.credentialsProviderEndpoints),
+    providerCatalog: (): Promise<SecretResult<ProviderKeyCatalog>> => ipcRenderer.invoke(IPC.credentialsProviderCatalog),
+    list: (): Promise<SecretResult<SecretMetadata[]>> => ipcRenderer.invoke(IPC.credentialsList),
+    save: (name: SecretName, value: string, mode: SecretSaveMode = 'update'): Promise<SecretResult<null>> => ipcRenderer.invoke(IPC.credentialsSave, name, value, mode),
+    saveProvider: (name: SecretName, value: string): Promise<SecretResult<null>> => ipcRenderer.invoke(IPC.credentialsSaveProvider, name, value),
+    remove: (name: SecretName, confirmed: boolean): Promise<SecretResult<null>> => ipcRenderer.invoke(IPC.credentialsRemove, name, confirmed)
+  },
   backend: {
     getState: (): Promise<BackendState> => ipcRenderer.invoke(IPC.backendGetState),
     onState: (listener: (state: BackendState) => void): Unsubscribe => subscribe(IPC.backendState, listener),

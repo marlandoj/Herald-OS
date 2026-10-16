@@ -131,7 +131,7 @@ describe('endpointKeys', () => {
 describe('providerChoices for custom endpoints', () => {
   const keys: KeyCatalog = { HERMES_CUSTOM_QWEN_FLASH_API_KEY: { is_password: true, is_set: true }, OPENROUTER_API_KEY: { provider: 'openrouter', is_password: true, is_set: false } }
   const endpoints = endpointKeys(CONFIG)
-  const custom = (slug: string, catalog = keys) => providerChoices(ENDPOINT_ROWS, [], catalog, endpoints).find(item => item.slug === slug)
+  const custom = (slug: string, catalog: KeyCatalog | null = keys) => providerChoices(ENDPOINT_ROWS, [], catalog, endpoints).find(item => item.slug === slug)
 
   it('takes and replaces the key in the variable the endpoint names', () => {
     expect(custom('qwen-flash')).toMatchObject({ current: true, ready: true, setup: 'key', keyEnv: 'HERMES_CUSTOM_QWEN_FLASH_API_KEY', helpUrl: null, command: null })
@@ -141,7 +141,7 @@ describe('providerChoices for custom endpoints', () => {
   it("is not ready while that variable is not in Hermes's .env", () => {
     expect(custom('vllm')).toMatchObject({ ready: false, setup: 'key', keyEnv: 'VLLM_KEY' })
     // Before the key catalog is read, Hermes's own word stands.
-    expect(custom('vllm', {})).toMatchObject({ ready: true, setup: 'key' })
+    expect(custom('vllm', null)).toMatchObject({ ready: true, setup: 'key' })
   })
 
   it('leaves an endpoint that names no key as Hermes has it', () => {

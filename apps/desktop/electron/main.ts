@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { type EnvInfo, type HeraldOSPrefs, IPC, type PrefsPatch, type RestRequest, type ShellCommand, type WindowState } from '../shared/ipc.ts'
 import { BackendManager } from './backend/manager.ts'
+import { registerRendererNetworkGuard } from './backend/renderer-network.ts'
 import { forgetInheritedSession } from './backend/session-env.ts'
 import { CrashWatcher } from './crash/watch.ts'
 import { mayOpenExternally } from './external-url.ts'
@@ -20,6 +21,7 @@ import { MODEL_SCHEME } from '../shared/canvas/models.ts'
 import { normalizeRoomPrefs } from '../shared/room.ts'
 import { registerCaptureIpc } from './ipc/capture.ts'
 import { registerControlsIpc } from './ipc/controls.ts'
+import { registerCredentialsIpc } from './ipc/credentials.ts'
 import { registerCatalogIpc } from './ipc/catalog.ts'
 import { registerSetupIpc } from './ipc/setup.ts'
 import { PluginHost } from './plugins/host.ts'
@@ -201,7 +203,8 @@ function broadcastWindowState(): void {
 function registerCoreIpc(): void {
   ipcMain.handle(IPC.backendGetState, () => backend.getState())
   ipcMain.handle(IPC.backendRestart, () => backend.restart())
-  ipcMain.handle(IPC.backendRest, (_event, request: RestRequest) => backend.rest(request))
+  ipcMain.handle(IPC.backendRest, (_event, request: RestRequest) => backend.restForRenderer(request))
+  registerCredentialsIpc(backend)
   ipcMain.handle(IPC.backendLogTail, (_event, lines: number) => [...logTail(lines), ...backend.getState().logTail])
 
   ipcMain.handle(IPC.notifyNative, (_event, title: string, body: string) => {
@@ -358,6 +361,7 @@ app.whenReady().then(async () => {
     app.dock?.setIcon(icon)
   }
 
+  registerRendererNetworkGuard(backend)
   registerCoreIpc()
   events.registerIpc()
   crashes.start()

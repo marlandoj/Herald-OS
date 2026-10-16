@@ -834,6 +834,12 @@ export const IPC = {
   backendRestart: 'herald-os:backend:restart',
   backendRest: 'herald-os:backend:rest',
   backendLogTail: 'herald-os:backend:log-tail',
+  credentialsList: 'herald-os:credentials:list',
+  credentialsProviderEndpoints: 'herald-os:credentials:provider-endpoints',
+  credentialsProviderCatalog: 'herald-os:credentials:provider-catalog',
+  credentialsSave: 'herald-os:credentials:save',
+  credentialsSaveProvider: 'herald-os:credentials:save-provider',
+  credentialsRemove: 'herald-os:credentials:remove',
 
   systemInfo: 'herald-os:system:info',
   systemStats: 'herald-os:system:stats',
